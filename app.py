@@ -1,155 +1,106 @@
-from flask import Flask, jsonify, request
-from flask_cors import CORS  # Add this for CORS support
+from flask import Flask, jsonify
 import requests
 import os
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS for all routes
 
-# ENV VARIABLES (set these in Render dashboard)
-XBOX_API_KEY = os.getenv("XBOX_API_KEY")
-NUMVERIFY_KEY = os.getenv("NUMVERIFY_KEY")
+IPINFO_TOKEN = os.getenv("IPINFO_TOKEN")
+HIBP_KEY = os.getenv("HIBP_KEY")
 
-# =========================
-# HOME
-# =========================
-@app.route("/")
-def home():
-    return jsonify({"status": "OSINT Backend Running"})  # Added jsonify
 
-# =========================
-# XBOX LOOKUP
-# =========================
-@app.route("/api/xbox/<gamertag>")
-def xbox_lookup(gamertag):
-    # Check if API key is configured
-    if not XBOX_API_KEY:
-        return jsonify({"error": "Xbox API key not configured"}), 500
-    
-    try:
-        url = f"https://xbl.io/api/v2/search/{gamertag}"
-        headers = {"X-Authorization": XBOX_API_KEY}
-
-        res = requests.get(url, headers=headers, timeout=10)  # Added timeout
-
-        if res.status_code != 200:
-            return jsonify({"error": f"Xbox API failed with status {res.status_code}"}), 500
-
-        data = res.json()
-
-        if "people" not in data or not data["people"]:
-            return jsonify({"error": "Gamertag not found"}), 404
-
-        user = data["people"][0]
-
-        return jsonify({
-            "gamertag": user.get("gamertag"),
-            "gamerscore": user.get("gamerScore"),
-            "xuid": user.get("xuid"),
-            "reputation": user.get("xboxOneRep"),
-            "displayPic": user.get("displayPicRaw")
-        })
-
-    except requests.exceptions.Timeout:
-        return jsonify({"error": "Request timeout"}), 500
-    except requests.exceptions.RequestException as e:
-        return jsonify({"error": f"Request failed: {str(e)}"}), 500
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-# =========================
-# PHONE LOOKUP
-# =========================
-@app.route("/api/phone")
-def phone_lookup():
-    # Check if API key is configured
-    if not NUMVERIFY_KEY:
-        return jsonify({"error": "Numverify API key not configured"}), 500
-    
-    number = request.args.get("number")
-
-    if not number:
-        return jsonify({"error": "Missing number parameter"}), 400
+# ================= ROBLOX USER LOOKUP =================
+@app.route("/api/roblox/<username>")
+def roblox_lookup(username):
 
     try:
-        # Clean the number (remove spaces, dashes, etc.)
-        clean_number = ''.join(filter(str.isdigit, number))
-        
-        url = f"http://apilayer.net/api/validate"
-        params = {
-            "access_key": NUMVERIFY_KEY,
-            "number": clean_number
+        # Step 1: get user ID
+        url = "https://users.roblox.com/v1/usernames/users"
+        payload = {
+            "usernames": [username],
+            "excludeBannedUsers": False
         }
-        
-        res = requests.get(url, params=params, timeout=10)  # Use params instead of string concatenation
-        
-        if res.status_code != 200:
-            return jsonify({"error": f"Phone API failed with status {res.status_code}"}), 500
-            
+
+        res = requests.post(url, json=payload)
         data = res.json()
 
-        # Check for API errors
-        if "error" in data:
-            return jsonify({"error": data["error"].get("info", "Phone API error")}), 400
+        if not data["data"]:
+            return jsonify({"error": "User not found"}), 404
+
+        user = data["data"][0]
+        user_id = user["id"]
+
+        # Step 2: profile info
+        profile = requests.get(f"https://users.roblox.com/v1/users/{user_id}").json()
+
+        # Step 3: avatar
+        avatar = requests.get(
+            f"https://thumbnails.roblox.com/v1/users/avatar-headshot"
+            f"?userIds={user_id}&size=150x150&format=Png&isCircular=false"
+        ).json()
 
         return jsonify({
-            "valid": data.get("valid", False),
-            "country_name": data.get("country_name"),
-            "carrier": data.get("carrier"),
-            "location": data.get("location"),
-            "country_code": data.get("country_code"),
-            "line_type": data.get("line_type")
+            "username": profile.get("name"),
+            "displayName": profile.get("displayName"),
+            "userId": user_id,
+            "created": profile.get("created"),
+            "description": profile.get("description"),
+            "avatar": avatar["data"][0]["imageUrl"] if avatar.get("data") else None
         })
 
-    except requests.exceptions.Timeout:
-        return jsonify({"error": "Request timeout"}), 500
-    except requests.exceptions.RequestException as e:
-        return jsonify({"error": f"Request failed: {str(e)}"}), 500
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# =========================
-# EMAIL (basic placeholder)
-# =========================
-@app.route("/api/email")
-def email_lookup():
-    email = request.args.get("email")
 
-    if not email:
-        return jsonify({"error": "Missing email parameter"}), 400
-    
-    # Basic email validation
-    if "@" not in email or "." not in email:
-        return jsonify({"error": "Invalid email format"}), 400
+# ================= IP OSINT (REAL) =================
+@app.route("/api/ip/<ip>")
+def ip_lookup(ip):
+    try:
+        res = requests.get(f"https://ipinfo.io/{ip}/json?token={IPINFO_TOKEN}")
+        return jsonify(res.json())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
-    # You can later connect HaveIBeenPwned or similar
+
+# ================= EMAIL BREACH (HIBP) =================
+@app.route("/api/breach/<email>")
+def breach_lookup(email):
+    try:
+        headers = {
+            "hibp-api-key": HIBP_KEY,
+            "user-agent": "OSINT-Hub"
+        }
+
+        res = requests.get(
+            f"https://haveibeenpwned.com/api/v3/breachedaccount/{email}",
+            headers=headers
+        )
+
+        if res.status_code == 404:
+            return jsonify({"breaches": []})
+
+        return jsonify({"breaches": res.json()})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ================= EXISTING XBOX (keep yours) =================
+@app.route("/api/xbox/<gamertag>")
+def xbox(gamertag):
+    url = f"https://xbl.io/api/v2/search/{gamertag}"
+    headers = {"X-Authorization": os.getenv("XBOX_KEY")}
+
+    r = requests.get(url, headers=headers)
+    data = r.json()
+
+    if "people" not in data or not data["people"]:
+        return jsonify({"error": "Not found"}), 404
+
+    user = data["people"][0]
+
     return jsonify({
-        "email": email,
-        "breaches": [],
-        "note": "No breach API connected yet"
+        "gamertag": user.get("gamertag"),
+        "gamerscore": user.get("gamerScore"),
+        "xuid": user.get("xuid"),
+        "displayPic": user.get("displayPicRaw")
     })
-
-# =========================
-# HEALTH CHECK (for Render)
-# =========================
-@app.route("/health")
-def health_check():
-    return jsonify({"status": "healthy"}), 200
-
-# =========================
-# ERROR HANDLERS
-# =========================
-@app.errorhandler(404)
-def not_found(error):
-    return jsonify({"error": "Endpoint not found"}), 404
-
-@app.errorhandler(405)
-def method_not_allowed(error):
-    return jsonify({"error": "Method not allowed"}), 405
-
-# =========================
-# RUN
-# =========================
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))  # Use PORT env var for Render
-    app.run(host="0.0.0.0", port=port, debug=False)  # Set debug=False in production
