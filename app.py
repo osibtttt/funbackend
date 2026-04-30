@@ -232,24 +232,26 @@ def breach_lookup(email):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# ================= XBOX LOOKUP =================
+# ================= XBOX LOOKUP (using friends/search endpoint) =================
 @app.route("/api/xbox/<gamertag>")
 def xbox_lookup(gamertag):
     try:
-        url = f"https://xbl.io/api/v2/search/{gamertag}"
+        url = f"https://xbl.io/api/v2/friends/search?gt={gamertag}"
         headers = {"X-Authorization": XBOX_KEY}
+
         r = requests.get(url, headers=headers)
         data = r.json()
 
-        if "people" not in data or not data["people"]:
+        # xbl.io returns: { "profileUsers": [ ... ] }
+        if "profileUsers" not in data or not data["profileUsers"]:
             return jsonify({"error": "Gamertag not found"}), 404
 
-        user = data["people"][0]
+        user = data["profileUsers"][0]
 
         return jsonify({
             "gamertag": user.get("gamertag"),
+            "xuid": user.get("id"),
             "gamerscore": user.get("gamerScore"),
-            "xuid": user.get("xuid"),
             "reputation": user.get("xboxOneRep", "Unknown"),
             "displayPic": user.get("displayPicRaw")
         })
