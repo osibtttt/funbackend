@@ -1,16 +1,20 @@
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify
 from flask_cors import CORS
 import requests
 import os
 import time
+from urllib.parse import quote
 
 app = Flask(__name__)
 CORS(app)
 
 IPINFO_TOKEN = os.getenv("IPINFO_TOKEN")
 HIBP_KEY = os.getenv("HIBP_KEY")
-APIFY_TOKEN = os.getenv("APIFY_TOKEN")  # use env var, NOT hardcoded
+APIFY_TOKEN = os.getenv("APIFY_TOKEN")
+
+# IMPORTANT: correct actor format
 ACTOR_ID = "eshaan/gaming-xbox-scraper-apify"
+
 
 # ================= ROBLOX LOOKUP =================
 @app.route("/api/roblox/<username>")
@@ -18,7 +22,7 @@ def roblox_lookup(username):
     try:
         url = "https://users.roblox.com/v1/usernames/users"
         payload = {"usernames": [username], "excludeBannedUsers": False}
-        res = requests.post(url, json=payload)
+        res = requests.post(url, json=payload, timeout=10)
         data = res.json()
 
         if "data" not in data or not data["data"]:
@@ -27,10 +31,11 @@ def roblox_lookup(username):
         user = data["data"][0]
         user_id = user["id"]
 
-        profile = requests.get(f"https://users.roblox.com/v1/users/{user_id}").json()
+        profile = requests.get(f"https://users.roblox.com/v1/users/{user_id}", timeout=10).json()
         avatar = requests.get(
             f"https://thumbnails.roblox.com/v1/users/avatar-headshot"
-            f"?userIds={user_id}&size=150x150&format=Png&isCircular=false"
+            f"?userIds={user_id}&size=150x150&format=Png&isCircular=false",
+            timeout=10
         ).json()
 
         return jsonify({
@@ -59,19 +64,26 @@ def ip_lookup(ip):
         return jsonify({"error": str(e)}), 500
 
 
+# ================= XBOX LOOKUP =================
 @app.route("/api/xbox/<gamertag>")
 def xbox_lookup(gamertag):
     try:
-        run_url = f"https://api.apify.com/v2/acts/{ACTOR_ID}/runs?token={APIFY_TOKEN}"
+        if not APIFY_TOKEN:
+            return jsonify({"error": "Missing APIFY_TOKEN"}), 500
+
+        # 🔥 FIX: encode actor ID
+        encoded_actor = quote(ACTOR_ID, safe='')
+
+        run_url = f"https://api.apify.com/v2/acts/{encoded_actor}/runs?token={APIFY_TOKEN}"
 
         payload = {
-            "search": gamertag   # <-- THIS is likely the correct key
+            "gamertag": gamertag
         }
 
+        # Start run
         run_res = requests.post(run_url, json=payload, timeout=15)
         run_data = run_res.json()
 
-        # 🔥 DEBUG CHECK
         if "data" not in run_data:
             return jsonify({
                 "error": "Apify failed",
@@ -83,9 +95,9 @@ def xbox_lookup(gamertag):
         # Wait for completion
         status_url = f"https://api.apify.com/v2/actor-runs/{run_id}?token={APIFY_TOKEN}"
 
-        for _ in range(15):
+        for _ in range(15):  # ~30 sec max
             status_res = requests.get(status_url, timeout=10).json()
-            status = status_res["data"]["status"]
+            status = status_res.get("data", {}).get("status")
 
             if status == "SUCCEEDED":
                 dataset_id = status_res["data"]["defaultDatasetId"]
@@ -98,6 +110,7 @@ def xbox_lookup(gamertag):
         else:
             return jsonify({"error": "Timeout"}), 504
 
+        # Get results
         dataset_url = f"https://api.apify.com/v2/datasets/{dataset_id}/items?token={APIFY_TOKEN}"
         data = requests.get(dataset_url, timeout=10).json()
 
@@ -116,6 +129,7 @@ def xbox_lookup(gamertag):
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
 
 # ================= ENTRYPOINT =================
 if __name__ == "__main__":
