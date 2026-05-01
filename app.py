@@ -3,7 +3,6 @@ from flask_cors import CORS
 import requests
 import os
 import time
-from urllib.parse import quote
 
 app = Flask(__name__)
 CORS(app)
@@ -12,9 +11,6 @@ IPINFO_TOKEN = os.getenv("IPINFO_TOKEN")
 HIBP_KEY = os.getenv("HIBP_KEY")
 APIFY_TOKEN = os.getenv("APIFY_TOKEN")
 APIFY_TASK_ID = os.getenv("APIFY_TASK_ID")
-
-# IMPORTANT: correct actor format
-ACTOR_ID = "eshaan/gaming-xbox-scraper-apify"
 
 
 # ================= ROBLOX LOOKUP =================
@@ -52,21 +48,35 @@ def roblox_lookup(username):
         return jsonify({"error": str(e)}), 500
 
 
+# ================= IP LOOKUP =================
+@app.route("/api/ip/<ip>")
+def ip_lookup(ip):
+    try:
+        res = requests.get(
+            f"https://ipinfo.io/{ip}/json?token={IPINFO_TOKEN}",
+            timeout=10
+        )
+        return jsonify(res.json())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # ================= XBOX LOOKUP =================
 @app.route("/api/xbox/<gamertag>")
 def xbox_lookup(gamertag):
     try:
-        # 🔍 Debug check (this fixes your confusion)
+        # 🔍 ENV CHECKS
         if not APIFY_TOKEN:
             return jsonify({"error": "Missing APIFY_TOKEN"}), 500
 
         if not APIFY_TASK_ID:
             return jsonify({"error": "Missing APIFY_TASK_ID"}), 500
 
+        # 🚀 Start task
         run_url = f"https://api.apify.com/v2/actor-tasks/{APIFY_TASK_ID}/runs?token={APIFY_TOKEN}"
 
         payload = {
-            "gamertag": gamertag
+            "search": gamertag   # 🔥 most actors use this
         }
 
         run_res = requests.post(run_url, json=payload, timeout=15)
@@ -80,6 +90,7 @@ def xbox_lookup(gamertag):
 
         run_id = run_data["data"]["id"]
 
+        # ⏳ Wait for completion
         status_url = f"https://api.apify.com/v2/actor-runs/{run_id}?token={APIFY_TOKEN}"
 
         for _ in range(15):
@@ -97,24 +108,35 @@ def xbox_lookup(gamertag):
         else:
             return jsonify({"error": "Timeout"}), 504
 
+        # 📦 Get dataset
         dataset_url = f"https://api.apify.com/v2/datasets/{dataset_id}/items?token={APIFY_TOKEN}"
         data = requests.get(dataset_url, timeout=10).json()
 
+        # 🔥 DEBUG: show raw data if empty
         if not data:
-            return jsonify({"error": "Gamertag not found"}), 404
+            return jsonify({
+                "error": "No results returned",
+                "debug": data
+            }), 404
 
         user = data[0]
 
+        # 🎯 Final formatted response (matches your frontend)
         return jsonify({
             "Platforms": user.get("Platform(s)"),
             "User Total Gamerscore": user.get("Game Title"),
             "User Name": user.get("User Name"),
             "displayPic": user.get("displayPicRaw"),
-            "accountTier": user.get("detail", {}).get("accountTier", "Unknown")
+            "accountTier": user.get("detail", {}).get("accountTier", "Unknown"),
+
+            # 👇 keep raw for debugging if needed
+            "raw": user
         })
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
 # ================= ENTRYPOINT =================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
