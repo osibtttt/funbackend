@@ -59,22 +59,31 @@ def ip_lookup(ip):
         return jsonify({"error": str(e)}), 500
 
 
-# ================= XBOX LOOKUP (FIXED) =================
 @app.route("/api/xbox/<gamertag>")
 def xbox_lookup(gamertag):
     try:
-        # 1. Start Apify actor
         run_url = f"https://api.apify.com/v2/acts/{ACTOR_ID}/runs?token={APIFY_TOKEN}"
 
-        run_res = requests.post(run_url, json={"gamertag": gamertag}, timeout=15)
+        payload = {
+            "search": gamertag   # <-- THIS is likely the correct key
+        }
+
+        run_res = requests.post(run_url, json=payload, timeout=15)
         run_data = run_res.json()
+
+        # 🔥 DEBUG CHECK
+        if "data" not in run_data:
+            return jsonify({
+                "error": "Apify failed",
+                "response": run_data
+            }), 500
 
         run_id = run_data["data"]["id"]
 
-        # 2. Wait for completion (max ~30s)
+        # Wait for completion
         status_url = f"https://api.apify.com/v2/actor-runs/{run_id}?token={APIFY_TOKEN}"
 
-        for _ in range(15):  # 15 tries * 2s = 30s max
+        for _ in range(15):
             status_res = requests.get(status_url, timeout=10).json()
             status = status_res["data"]["status"]
 
@@ -87,9 +96,8 @@ def xbox_lookup(gamertag):
 
             time.sleep(2)
         else:
-            return jsonify({"error": "Xbox lookup timed out"}), 504
+            return jsonify({"error": "Timeout"}), 504
 
-        # 3. Fetch results
         dataset_url = f"https://api.apify.com/v2/datasets/{dataset_id}/items?token={APIFY_TOKEN}"
         data = requests.get(dataset_url, timeout=10).json()
 
@@ -108,7 +116,6 @@ def xbox_lookup(gamertag):
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
 
 # ================= ENTRYPOINT =================
 if __name__ == "__main__":
