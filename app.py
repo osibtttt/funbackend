@@ -52,7 +52,7 @@ def roblox_lookup(username):
         return jsonify({"error": str(e)}), 500
 
 
-# ================= IP LOOKUP =================
+# ================= XBOX LOOKUP =================
 @app.route("/api/xbox/<gamertag>")
 def xbox_lookup(gamertag):
     try:
