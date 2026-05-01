@@ -11,6 +11,7 @@ CORS(app)
 IPINFO_TOKEN = os.getenv("IPINFO_TOKEN")
 HIBP_KEY = os.getenv("HIBP_KEY")
 APIFY_TOKEN = os.getenv("APIFY_TOKEN")
+APIFY_TASK_ID = os.getenv("APIFY_TASK_ID")
 
 # IMPORTANT: correct actor format
 ACTOR_ID = "eshaan/gaming-xbox-scraper-apify"
@@ -63,24 +64,19 @@ def ip_lookup(ip):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-
-# ================= XBOX LOOKUP =================
 @app.route("/api/xbox/<gamertag>")
 def xbox_lookup(gamertag):
     try:
-        if not APIFY_TOKEN:
-            return jsonify({"error": "Missing APIFY_TOKEN"}), 500
+        if not APIFY_TOKEN or not APIFY_TASK_ID:
+            return jsonify({"error": "Missing APIFY config"}), 500
 
-        # 🔥 FIX: encode actor ID
-        encoded_actor = quote(ACTOR_ID, safe='')
-
-        run_url = f"https://api.apify.com/v2/acts/{encoded_actor}/runs?token={APIFY_TOKEN}"
+        # Start task run
+        run_url = f"https://api.apify.com/v2/actor-tasks/{APIFY_TASK_ID}/runs?token={APIFY_TOKEN}"
 
         payload = {
             "gamertag": gamertag
         }
 
-        # Start run
         run_res = requests.post(run_url, json=payload, timeout=15)
         run_data = run_res.json()
 
@@ -95,7 +91,7 @@ def xbox_lookup(gamertag):
         # Wait for completion
         status_url = f"https://api.apify.com/v2/actor-runs/{run_id}?token={APIFY_TOKEN}"
 
-        for _ in range(15):  # ~30 sec max
+        for _ in range(15):
             status_res = requests.get(status_url, timeout=10).json()
             status = status_res.get("data", {}).get("status")
 
@@ -129,8 +125,6 @@ def xbox_lookup(gamertag):
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-
 # ================= ENTRYPOINT =================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
