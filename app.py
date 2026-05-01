@@ -10,7 +10,7 @@ CORS(app)
 IPINFO_TOKEN = os.getenv("IPINFO_TOKEN")
 HIBP_KEY = os.getenv("HIBP_KEY")
 APIFY_TOKEN = os.getenv("APIFY_TOKEN")  # use env var, NOT hardcoded
-ACTOR_ID = "LndnXzYNYWQTif2Wi"
+ACTOR_ID = "eshaan/gaming-xbox-scraper-apify"
 
 # ================= ROBLOX LOOKUP =================
 @app.route("/api/roblox/<username>")
