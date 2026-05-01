@@ -53,24 +53,16 @@ def roblox_lookup(username):
 
 
 # ================= IP LOOKUP =================
-@app.route("/api/ip/<ip>")
-def ip_lookup(ip):
-    try:
-        res = requests.get(
-            f"https://ipinfo.io/{ip}/json?token={IPINFO_TOKEN}",
-            timeout=10
-        )
-        return jsonify(res.json())
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
 @app.route("/api/xbox/<gamertag>")
 def xbox_lookup(gamertag):
     try:
-        if not APIFY_TOKEN or not APIFY_TASK_ID:
-            return jsonify({"error": "Missing APIFY config"}), 500
+        # 🔍 Debug check (this fixes your confusion)
+        if not APIFY_TOKEN:
+            return jsonify({"error": "Missing APIFY_TOKEN"}), 500
 
-        # Start task run
+        if not APIFY_TASK_ID:
+            return jsonify({"error": "Missing APIFY_TASK_ID"}), 500
+
         run_url = f"https://api.apify.com/v2/actor-tasks/{APIFY_TASK_ID}/runs?token={APIFY_TOKEN}"
 
         payload = {
@@ -88,7 +80,6 @@ def xbox_lookup(gamertag):
 
         run_id = run_data["data"]["id"]
 
-        # Wait for completion
         status_url = f"https://api.apify.com/v2/actor-runs/{run_id}?token={APIFY_TOKEN}"
 
         for _ in range(15):
@@ -106,7 +97,6 @@ def xbox_lookup(gamertag):
         else:
             return jsonify({"error": "Timeout"}), 504
 
-        # Get results
         dataset_url = f"https://api.apify.com/v2/datasets/{dataset_id}/items?token={APIFY_TOKEN}"
         data = requests.get(dataset_url, timeout=10).json()
 
